@@ -10,6 +10,12 @@ param (
 # Enable or disable AI inference (set to $false for test mode)
 $ENABLE_AI_INFERENCE = $true  # Set to $true to run inference; $false to skip for testing
 
+# Set to $true to copy SVS, logs, CSV, etc. into OneDrive
+$ENABLE_ONEDRIVE_SYNC = $true
+
+# Set to $true to copy SVS, logs, CSV, etc. into Google Drive
+$ENABLE_GDRIVE_SYNC = $true
+
 ###############################################################################
 # STEP 0: Enable Windows Forms and Visual Styles
 ###############################################################################
@@ -105,24 +111,62 @@ $OutputDir  = Join-Path $ScriptDir "heatmaps"
 $LogDir     = Join-Path $ScriptDir "log"
 
 # Setup OneDrive backup
-$OneDriveFolder = $env:OneDrive
-if (-not $OneDriveFolder) {
-    # Fallback: Query registry
-    $OneDriveFolder = (Get-ItemProperty -Path "HKCU:\Software\Microsoft\OneDrive" -Name "UserFolder" -ErrorAction SilentlyContinue).UserFolder
+if ($ENABLE_ONEDRIVE_SYNC) {
+    $OneDriveFolder = $env:OneDrive
+    if (-not $OneDriveFolder) {
+        # Fallback: Query registry
+        $OneDriveFolder = (Get-ItemProperty -Path "HKCU:\Software\Microsoft\OneDrive" -Name "UserFolder" -ErrorAction SilentlyContinue).UserFolder
+    }
+
+    if ($OneDriveFolder) {
+        # Create KOH Analysis folder structure in OneDrive
+        $OneDriveBackupRoot = Join-Path $OneDriveFolder "KOH_Analysis"
+        $OneDriveHeatmaps = Join-Path $OneDriveBackupRoot "heatmaps"
+        $OneDriveLogs = Join-Path $OneDriveBackupRoot "logs"
+        $OneDriveScans = Join-Path $OneDriveBackupRoot "scans"
+        
+        # Create directories if they don't exist
+        @($OneDriveBackupRoot, $OneDriveHeatmaps, $OneDriveLogs, $OneDriveScans) | ForEach-Object {
+            if (-not (Test-Path $_)) {
+                New-Item -ItemType Directory -Path $_ -Force | Out-Null
+            }
+        }
+        Add-Content $LogFile "OneDrive backup enabled: $OneDriveBackupRoot"
+    } else {
+        Add-Content $LogFile "OneDrive backup disabled: OneDrive not found"
+        $ENABLE_ONEDRIVE_SYNC = $false
+    }
+} else {
+    Add-Content $LogFile "OneDrive backup disabled by configuration"
 }
 
-if ($OneDriveFolder) {
-    # Create KOH Analysis folder structure in OneDrive
-    $OneDriveBackupRoot = Join-Path $OneDriveFolder "KOH_Analysis"
-    $OneDriveHeatmaps = Join-Path $OneDriveBackupRoot "heatmaps"
-    $OneDriveLogs = Join-Path $OneDriveBackupRoot "logs"
-    $OneDriveScans = Join-Path $OneDriveBackupRoot "scans"
-    
-    # Create directories if they don't exist
-    @($OneDriveBackupRoot, $OneDriveHeatmaps, $OneDriveLogs, $OneDriveScans) | ForEach-Object {
-        if (-not (Test-Path $_)) {
-            New-Item -ItemType Directory -Path $_ -Force | Out-Null
+###############################################################################
+# STEP 2.5: Detect & prepare Google Drive sync folder
+###############################################################################
+$GDriveRoot = "G:\My Drive"
+if ($ENABLE_GDRIVE_SYNC) {
+    if (Test-Path $GDriveRoot) {
+        $GDriveBackupRoot = Join-Path $GDriveRoot 'KOH_Analysis'
+        $GDriveLogs = Join-Path $GDriveBackupRoot 'logs'
+        
+        # Create directories if they don't exist
+        try {
+            if (-not (Test-Path $GDriveBackupRoot)) {
+                New-Item -ItemType Directory -Path $GDriveBackupRoot -Force | Out-Null
+                Add-Content $LogFile "Created Google Drive backup root: $GDriveBackupRoot"
+            }
+            if (-not (Test-Path $GDriveLogs)) {
+                New-Item -ItemType Directory -Path $GDriveLogs -Force | Out-Null
+                Add-Content $LogFile "Created Google Drive logs directory: $GDriveLogs"
+            }
+            Add-Content $LogFile "Google Drive backup enabled: $GDriveLogs"
+        } catch {
+            Add-Content $LogFile "Error creating Google Drive directories: $_"
+            $ENABLE_GDRIVE_SYNC = $false
         }
+    } else {
+        Add-Content $LogFile "Google Drive not found at: $GDriveRoot"
+        $ENABLE_GDRIVE_SYNC = $false
     }
 }
 
@@ -138,7 +182,7 @@ Add-Content $LogFile "`n===== $(Get-Date) ====="
 Add-Content $LogFile "Script directory: $ScriptDir"
 Add-Content $LogFile "Slide path: $SlidePath"
 Add-Content $LogFile "Executable path: $Executable"
-if ($OneDriveFolder) {
+if ($ENABLE_ONEDRIVE_SYNC -and $OneDriveFolder) {
     Add-Content $LogFile "OneDrive backup enabled: $OneDriveBackupRoot"
 } else {
     Add-Content $LogFile "OneDrive backup disabled: OneDrive not found"
@@ -413,7 +457,7 @@ if (-not $ENABLE_AI_INFERENCE) {
             Start-Process $latestOverlay
 
             # Backup to OneDrive if available
-            if ($OneDriveFolder) {
+            if ($ENABLE_ONEDRIVE_SYNC -and $OneDriveFolder) {
                 $overlayImages | ForEach-Object {
                     $destPath = Join-Path $OneDriveHeatmaps $_.Name
                     Copy-Item -Path $_.FullName -Destination $destPath -Force
@@ -591,7 +635,7 @@ $csvLine = [PSCustomObject]@{
 $csvLine | Export-Csv -Path $CsvLogFile -Append -NoTypeInformation -Force
 
 # Backup logs to OneDrive if available
-if ($OneDriveFolder) {
+if ($ENABLE_ONEDRIVE_SYNC -and $OneDriveFolder) {
     # Backup CSV
     Copy-Item -Path $CsvLogFile -Destination (Join-Path $OneDriveLogs "interpretation_history.csv") -Force
     
@@ -603,4 +647,24 @@ if ($OneDriveFolder) {
     Copy-Item -Path $StdErrFile -Destination (Join-Path $OneDriveLogs "stderr.txt") -Force
     
     Add-Content $LogFile "Backed up log files to OneDrive: $OneDriveLogs"
+}
+
+###############################################################################
+# STEP 9: Backup logs & CSV to Google Drive (if enabled)
+###############################################################################
+if ($ENABLE_GDRIVE_SYNC -and $GDriveRoot) {
+    try {
+        # Test if Google Drive is accessible
+        if (Test-Path $GDriveRoot) {
+            Copy-Item $CsvLogFile -Destination (Join-Path $GDriveLogs 'interpretation_history.csv') -Force -ErrorAction Stop
+            Copy-Item $LogFile -Destination (Join-Path $GDriveLogs 'run_inference_log.txt') -Force -ErrorAction Stop
+            Copy-Item $StdOutFile -Destination (Join-Path $GDriveLogs 'stdout.txt') -Force -ErrorAction Stop
+            Copy-Item $StdErrFile -Destination (Join-Path $GDriveLogs 'stderr.txt') -Force -ErrorAction Stop
+            Add-Content $LogFile "Successfully backed up logs & CSV to Google Drive: $GDriveLogs"
+        } else {
+            Add-Content $LogFile "Google Drive path not accessible: $GDriveRoot"
+        }
+    } catch {
+        Add-Content $LogFile "Error backing up to Google Drive: $_"
+    }
 }
