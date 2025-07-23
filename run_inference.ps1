@@ -17,6 +17,13 @@ $ENABLE_ONEDRIVE_SYNC = $true
 # Set to $true to copy SVS, logs, CSV, etc. into Google Drive
 $ENABLE_GDRIVE_SYNC = $true
 
+# Path to the threshold JSON file (edit here if needed)
+$ThresholdFile = "models/mil_threshold_v3_fold_1.json" # turn off to use default threshold for default aggregator
+# Path to the aggregator weights file (edit here if needed)
+# $AggregatorFile = "models/aggregator.pth"
+$AggregatorFile = "models/mil_weights_v3_fold_1.pth"
+
+
 ###############################################################################
 # STEP 0: Enable Windows Forms and Visual Styles
 ###############################################################################
@@ -136,6 +143,13 @@ $qualitySubmit.Location = New-Object System.Drawing.Point(200, 200)
 $qualitySubmit.Size = New-Object System.Drawing.Size(100, 30)
 $qualityForm.Controls.Add($qualitySubmit)
 
+# Add Skip button
+$qualitySkip = New-Object System.Windows.Forms.Button
+$qualitySkip.Text = "Skip"
+$qualitySkip.Location = New-Object System.Drawing.Point(320, 200)
+$qualitySkip.Size = New-Object System.Drawing.Size(100, 30)
+$qualityForm.Controls.Add($qualitySkip)
+
 $qualitySubmit.Add_Click({
     if ($qualityCombo.SelectedItem) {
         $global:SlideQuality = $qualityCombo.SelectedItem
@@ -143,6 +157,10 @@ $qualitySubmit.Add_Click({
     } else {
         [System.Windows.Forms.MessageBox]::Show("Please select a slide quality rating.", "Input Required", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Exclamation) | Out-Null
     }
+})
+$qualitySkip.Add_Click({
+    $global:SlideQuality = "Skipped"
+    $qualityForm.Close()
 })
 
 $qualityForm.ShowDialog() | Out-Null
@@ -248,7 +266,7 @@ Add-Content $LogFile "Set KMP_DUPLICATE_LIB_OK=TRUE"
 # Setup CSV logging
 $CsvLogFile = Join-Path $LogDir "interpretation_history.csv"
 # Prepare CSV file and header migration if needed
-$expectedHeader = "Timestamp,Operator Name,Slide Path,Slide Quality,Initial Human Interpretation,Other Interpretation Details,AI Prediction,Final Human Interpretation,Final Other Details"
+$expectedHeader = "Timestamp,Operator Name,Slide Path,Slide Quality,Initial Human Interpretation,Other Interpretation Details,AI Prediction,AI Probability,Final Human Interpretation,Final Other Details"
 if (-not (Test-Path $CsvLogFile)) {
     # No CSV exists: create fresh with header
     $expectedHeader | Out-File $CsvLogFile -Encoding utf8
@@ -283,13 +301,22 @@ if (-not (Test-Path $CsvLogFile)) {
     }
 }
 
+# Read and parse the threshold value
+if (Test-Path $ThresholdFile) {
+    $ThresholdJson = Get-Content $ThresholdFile -Raw | ConvertFrom-Json
+    $DetectionThreshold = $ThresholdJson[0]
+} else {
+    # Fallback to a default value if file not found
+    $DetectionThreshold = 0.4597581923007965
+}
+
 $ArgsString = @(
     "--slide_path `"$SlidePath`"",
     "--embedder_low `"$ModelsDir\low_mag_embedder.pth`"",
     "--embedder_high `"$ModelsDir\high_mag_embedder.pth`"",
-    "--aggregator `"$ModelsDir\aggregator.pth`"",
+    "--aggregator `"$AggregatorFile`"",
     "--device cpu",
-    "--detection_threshold 0.4597581923007965",
+    "--detection_threshold $DetectionThreshold",
     "--output `"$OutputDir`""
 ) -join " "
 
@@ -494,9 +521,19 @@ if (-not $ENABLE_AI_INFERENCE) {
         } else {
             "Error: No prediction found"
         }
-        
+        # Extract AI probability/confidence
+        $AIProbability = if ($Output -match "Probability: ([0-9.]+)") {
+            $matches[1]
+        } else {
+            ""
+        }
         # Clarify that "Positive" means filamentous fungus
         $Output = $Output -replace "Prediction: Positive", "Prediction: Positive (indicative of filamentous fungus)"
+        
+        # Add clarifying line about probability
+        if ($Output -match "Probability:\s*[0-9.]+") {
+            $Output = $Output -replace "(Probability:\s*[0-9.]+)", "$& (probability that the slide is positive for filamentous fungus)"
+        }
         
         # Add disclaimer about AI
         $Output += "`r`n`r`nDISCLAIMER: This analysis is performed by an AI model that can make mistakes. Please interpret results accordingly."
@@ -684,6 +721,7 @@ $csvLine = [PSCustomObject]@{
     'Initial Human Interpretation' = $global:PrelimInterpretation
     'Other Interpretation Details' = if ($global:OtherInterpretation) { $global:OtherInterpretation } else { "NA" }
     'AI Prediction' = $AIPrediction
+    'AI Probability' = $AIProbability
     'Final Human Interpretation' = $global:FinalInterpretation
     'Final Other Details' = if ($global:FinalOtherInterpretation) { $global:FinalOtherInterpretation } else { "NA" }
 }
