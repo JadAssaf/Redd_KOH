@@ -8,7 +8,8 @@ param (
 )
 
 # Enable or disable AI inference (set to $false for test mode)
-$ENABLE_AI_INFERENCE = $true  # Set to $true to run inference; $false to skip for testing
+#$ENABLE_AI_INFERENCE = $true  # Set to $true to run inference; $false to skip for testing
+$ENABLE_AI_INFERENCE = $false  # Set to $true to run inference; $false to skip for testing
 
 # Set to $true to copy SVS, logs, CSV, etc. into OneDrive
 $ENABLE_ONEDRIVE_SYNC = $true
@@ -98,6 +99,58 @@ if (-not $global:UserName) {
     return
 }
 Add-Content $LogFile "User Name: $global:UserName"
+
+###############################################################################
+# STEP 2.1: Get Slide Quality Assessment
+###############################################################################
+$global:SlideQuality = $null
+$qualityForm = New-Object System.Windows.Forms.Form
+$qualityForm.Text = "Slide Quality Assessment"
+$qualityForm.Size = New-Object System.Drawing.Size(500, 320)
+$qualityForm.StartPosition = 'CenterScreen'
+$qualityForm.TopMost = $true
+$qualityForm.FormBorderStyle = 'FixedDialog'
+$qualityForm.MaximizeBox = $false
+$qualityForm.MinimizeBox = $false
+
+$qualityLabel = New-Object System.Windows.Forms.Label
+$qualityLabel.Text = "Please rate the overall quality of the whole slide image:`r`n`r`nGood: Majority of the slide is in focus.`r`nFair: Some areas are out of focus or have artifacts, but interpretation is possible.`r`nPoor: Majority of the slide is out of focus, or there are many artifacts making interpretation tough."
+$qualityLabel.AutoSize = $false
+$qualityLabel.Size = New-Object System.Drawing.Size(460, 100)
+$qualityLabel.Location = New-Object System.Drawing.Point(20, 20)
+$qualityLabel.TextAlign = [System.Drawing.ContentAlignment]::TopLeft
+$qualityForm.Controls.Add($qualityLabel)
+
+$qualityCombo = New-Object System.Windows.Forms.ComboBox
+$qualityCombo.Location = New-Object System.Drawing.Point(20, 130)
+$qualityCombo.Size = New-Object System.Drawing.Size(440, 30)
+$qualityCombo.Items.Add("Good")
+$qualityCombo.Items.Add("Fair")
+$qualityCombo.Items.Add("Poor")
+$qualityCombo.DropDownStyle = "DropDownList"
+$qualityForm.Controls.Add($qualityCombo)
+
+$qualitySubmit = New-Object System.Windows.Forms.Button
+$qualitySubmit.Text = "Submit"
+$qualitySubmit.Location = New-Object System.Drawing.Point(200, 200)
+$qualitySubmit.Size = New-Object System.Drawing.Size(100, 30)
+$qualityForm.Controls.Add($qualitySubmit)
+
+$qualitySubmit.Add_Click({
+    if ($qualityCombo.SelectedItem) {
+        $global:SlideQuality = $qualityCombo.SelectedItem
+        $qualityForm.Close()
+    } else {
+        [System.Windows.Forms.MessageBox]::Show("Please select a slide quality rating.", "Input Required", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Exclamation) | Out-Null
+    }
+})
+
+$qualityForm.ShowDialog() | Out-Null
+if (-not $global:SlideQuality) {
+    Write-Host "Slide quality not provided. Exiting."
+    return
+}
+Add-Content $LogFile "Slide Quality: $global:SlideQuality"
 
 ###############################################################################
 # STEP 2: Setup Paths, Logging, and Environment
@@ -195,7 +248,7 @@ Add-Content $LogFile "Set KMP_DUPLICATE_LIB_OK=TRUE"
 # Setup CSV logging
 $CsvLogFile = Join-Path $LogDir "interpretation_history.csv"
 # Prepare CSV file and header migration if needed
-$expectedHeader = "Timestamp,Operator Name,Slide Path,Initial Human Interpretation,Other Interpretation Details,AI Prediction,Final Human Interpretation,Final Other Details"
+$expectedHeader = "Timestamp,Operator Name,Slide Path,Slide Quality,Initial Human Interpretation,Other Interpretation Details,AI Prediction,Final Human Interpretation,Final Other Details"
 if (-not (Test-Path $CsvLogFile)) {
     # No CSV exists: create fresh with header
     $expectedHeader | Out-File $CsvLogFile -Encoding utf8
@@ -209,15 +262,16 @@ if (-not (Test-Path $CsvLogFile)) {
         $oldRecords = Get-Content $CsvLogFile | Select-Object -Skip 1
         # Rewrite CSV with new header
         $expectedHeader | Out-File $CsvLogFile -Encoding utf8
-        # Migrate old records: insert empty placeholders for Slide Path and Final Other Details
+        # Migrate old records: insert empty placeholders for Slide Path, Slide Quality, and Final Other Details
         foreach ($line in $oldRecords) {
             $cols = $line -split ','
             # Ensure we have at least 6 columns: Timestamp,Operator Name,Initial Human Interpretation,Other Interpretation Details,AI Prediction,Final Human Interpretation
-            # Then build new row with empty Slide Path at pos 2 and empty Final Other Details at end
+            # Then build new row with empty Slide Path at pos 2, Slide Quality at pos 3, and empty Final Other Details at end
             $newCols = @(
                 $cols[0],
                 $cols[1],
                 "",            # Slide Path placeholder
+                "",            # Slide Quality placeholder
                 $cols[2],
                 $cols[3],
                 $cols[4],
@@ -534,7 +588,7 @@ $panel.Padding = New-Object System.Windows.Forms.Padding(30, 20, 30, 20)
 $finalForm.Controls.Add($panel)
 
 $finalLabel = New-Object System.Windows.Forms.Label
-$finalLabel.Text = "Look at the prediction heatmap and the slide again.`nWhat is your final interpretation?"
+$finalLabel.Text = "Look at the prediction heatmap and the slide again.`r`nWhat is your final interpretation?"
 $finalLabel.AutoSize = $false
 $finalLabel.Size = New-Object System.Drawing.Size(390, 45)
 $finalLabel.Location = New-Object System.Drawing.Point(20, 20)
@@ -626,6 +680,7 @@ $csvLine = [PSCustomObject]@{
     'Timestamp' = $timestamp
     'Operator Name' = $global:UserName
     'Slide Path' = $SlidePath
+    'Slide Quality' = $global:SlideQuality
     'Initial Human Interpretation' = $global:PrelimInterpretation
     'Other Interpretation Details' = if ($global:OtherInterpretation) { $global:OtherInterpretation } else { "NA" }
     'AI Prediction' = $AIPrediction
