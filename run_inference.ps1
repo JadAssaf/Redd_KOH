@@ -9,7 +9,7 @@ param (
 
 # Enable or disable AI inference (set to $false for test mode)
 #$ENABLE_AI_INFERENCE = $true  # Set to $true to run inference; $false to skip for testing
-$ENABLE_AI_INFERENCE = $false  # Set to $true to run inference; $false to skip for testing
+$ENABLE_AI_INFERENCE = $true  # Set to $true to run inference; $false to skip for testing
 
 # Set to $true to copy SVS, logs, CSV, etc. into OneDrive
 $ENABLE_ONEDRIVE_SYNC = $true
