@@ -31,7 +31,24 @@ Add-Type -AssemblyName System.Windows.Forms
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 ###############################################################################
-# STEP 0.2: Validate Slide Path
+# STEP 0.2: Initialize Logging First
+###############################################################################
+$ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$LogDir     = Join-Path $ScriptDir "log"
+
+if (-not (Test-Path $LogDir)) {
+    New-Item -ItemType Directory -Path $LogDir | Out-Null
+}
+
+$LogFile    = Join-Path $LogDir "run_inference_log.txt"
+$StdOutFile = Join-Path $LogDir "stdout.txt"
+$StdErrFile = Join-Path $LogDir "stderr.txt"
+
+Add-Content $LogFile "`n===== $(Get-Date) ====="
+Add-Content $LogFile "Script directory: $ScriptDir"
+
+###############################################################################
+# STEP 0.3: Validate Slide Path
 ###############################################################################
 if (-not $SlidePath -or -not (Test-Path $SlidePath)) {
     [System.Windows.Forms.MessageBox]::Show("No or invalid slide path provided. Please select the slide file.", "Input Required", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Exclamation) | Out-Null
@@ -171,15 +188,13 @@ if (-not $global:SlideQuality) {
 Add-Content $LogFile "Slide Quality: $global:SlideQuality"
 
 ###############################################################################
-# STEP 2: Setup Paths, Logging, and Environment
+# STEP 2: Setup Remaining Paths and Environment
 ###############################################################################
 $TriggerTime = Get-Date  # Record trigger time for filtering overlay images
 
-$ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $ModelsDir  = Join-Path $ScriptDir "models"
 $Executable = Join-Path $ScriptDir "inference.exe"
 $OutputDir  = Join-Path $ScriptDir "heatmaps"
-$LogDir     = Join-Path $ScriptDir "log"
 
 # Setup OneDrive backup
 if ($ENABLE_ONEDRIVE_SYNC) {
@@ -241,17 +256,6 @@ if ($ENABLE_GDRIVE_SYNC) {
     }
 }
 
-if (-not (Test-Path $LogDir)) {
-    New-Item -ItemType Directory -Path $LogDir | Out-Null
-}
-
-$LogFile    = Join-Path $LogDir "run_inference_log.txt"
-$StdOutFile = Join-Path $LogDir "stdout.txt"
-$StdErrFile = Join-Path $LogDir "stderr.txt"
-
-Add-Content $LogFile "`n===== $(Get-Date) ====="
-Add-Content $LogFile "Script directory: $ScriptDir"
-Add-Content $LogFile "Slide path: $SlidePath"
 Add-Content $LogFile "Executable path: $Executable"
 if ($ENABLE_ONEDRIVE_SYNC -and $OneDriveFolder) {
     Add-Content $LogFile "OneDrive backup enabled: $OneDriveBackupRoot"
