@@ -17,13 +17,6 @@ $ENABLE_ONEDRIVE_SYNC = $true
 # Set to $true to copy SVS, logs, CSV, etc. into Google Drive
 $ENABLE_GDRIVE_SYNC = $true
 
-# Path to the threshold JSON file (edit here if needed)
-$ThresholdFile = "models/mil_threshold_v3_fold_1.json" # turn off to use default threshold for default aggregator
-# Path to the aggregator weights file (edit here if needed)
-# $AggregatorFile = "models/aggregator.pth"
-$AggregatorFile = "models/mil_weights_v3_fold_1.pth"
-
-
 ###############################################################################
 # STEP 0: Enable Windows Forms and Visual Styles
 ###############################################################################
@@ -34,6 +27,12 @@ Add-Type -AssemblyName System.Windows.Forms
 # STEP 0.2: Initialize Logging First
 ###############################################################################
 $ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Definition
+
+# Path to the threshold JSON file (edit here if needed)
+$ThresholdFile = Join-Path $ScriptDir "models\mil_threshold_v3_fold_1.json" # turn off to use default threshold for default aggregator
+# Path to the aggregator weights file (edit here if needed)
+# $AggregatorFile = Join-Path $ScriptDir "models\aggregator.pth"
+$AggregatorFile = Join-Path $ScriptDir "models\mil_weights_v3_fold_1.pth"
 $LogDir     = Join-Path $ScriptDir "log"
 
 if (-not (Test-Path $LogDir)) {
